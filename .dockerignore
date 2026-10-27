@@ -1,0 +1,9 @@
+.git
+.venv
+**/node_modules
+**/__pycache__
+**/*.db*
+**/.test-tmp
+.env
+qa
+preview-site

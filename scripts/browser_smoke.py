@@ -1,0 +1,85 @@
+"""Browser flow against the real API + PostgreSQL + Redis/Celery in CI."""
+import json
+import os
+from pathlib import Path
+from playwright.sync_api import sync_playwright, expect
+
+output = Path(os.environ.get("QA_OUTPUT", "/tmp/supportflow-qa"))
+output.mkdir(parents=True, exist_ok=True)
+url = os.environ.get("APP_URL", "http://127.0.0.1:5080")
+with sync_playwright() as p:
+    browser = p.chromium.launch(channel="chrome", headless=True)
+    context = browser.new_context(viewport={"width": 1536, "height": 1024})
+    page = context.new_page()
+    errors = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    page.on("console", lambda message: errors.append(message.text) if message.type == "error" else None)
+    page.goto(url, wait_until="networkidle")
+    expect(page).to_have_title("SupportFlow AI")
+    expect(page.get_by_role("button", name="Открыть демо-магазин")).to_be_visible()
+    page.get_by_role("button", name="Открыть демо-магазин").click()
+    expect(page.locator(".ticket-row")).to_have_count(6)
+    expect(page.get_by_role("heading", name="Возврат заказа №1042")).to_be_visible()
+    page.get_by_role("button", name="Подготовить ответ").click()
+    confirm = page.get_by_role("button", name="Подтвердить возврат")
+    expect(confirm).to_be_visible(timeout=40000)
+    expect(confirm).to_be_disabled()
+    expect(page.locator(".source")).to_contain_text("14 дней")
+    page.screenshot(path=str(output / "desktop-review.png"), full_page=False)
+    page.get_by_label("Подтверждаю, что товар не использован").check()
+    confirm.click()
+    expect(page.locator(".proposal-title")).to_contain_text("Заявка создана")
+    expect(page.get_by_label("Ответ клиенту")).to_have_value(__import__("re").compile(".*RET-.*"))
+    page.get_by_role("button", name="Отправить ответ").click()
+    expect(page.locator(".message.operator")).to_have_count(1)
+    page.get_by_role("button", name="История", exact=True).click()
+    expect(page.locator(".timeline")).to_contain_text("Создана заявка на возврат")
+    page.get_by_role("button", name="Проверки", exact=True).click()
+    expect(page.locator(".check-summary")).to_contain_text("12 из 12")
+    page.get_by_role("button", name="Заказы", exact=True).click()
+    expect(page.locator("tbody tr")).to_have_count(6)
+    page.get_by_label("Организация", exact=True).select_option(label="North Supply")
+    page.get_by_role("button", name="История", exact=True).click()
+    expect(page.get_by_text("История появится после первого действия")).to_be_visible()
+    page.get_by_role("button", name="База знаний", exact=True).click()
+    expect(page.locator(".knowledge-list")).to_contain_text("30 дней")
+    page.get_by_label("Роль в демо").select_option("viewer")
+    expect(page.get_by_role("button", name="Новое обращение")).to_be_disabled()
+    page.get_by_role("button", name="Обращения", exact=True).click()
+    expect(page.get_by_role("button", name="Подготовить ответ")).to_be_disabled()
+    page.get_by_label("Роль в демо").select_option("operator")
+    expect(page.get_by_role("button", name="Новое обращение")).to_be_enabled()
+    page.get_by_role("button", name="Новое обращение").click()
+    dialog = page.get_by_role("dialog", name="Новое обращение")
+    dialog.get_by_label("Имя клиента").fill("<b>Тест</b>")
+    dialog.get_by_label("Код клиента").fill("test-client")
+    dialog.get_by_label("Тема", exact=True).fill("<img src=x onerror=alert(1)>")
+    dialog.get_by_label("Сообщение", exact=True).fill("<script>alert('test')</script>")
+    dialog.get_by_role("button", name="Создать обращение").click()
+    expect(page.get_by_role("heading", name="<img src=x onerror=alert(1)>", exact=True)).to_be_visible()
+    assert page.locator("img").count() == 0
+    page.locator(".ticket-row").filter(has_text="Возврат заказа №1042").click()
+    page.get_by_role("button", name="Подготовить ответ").click()
+    expect(page.get_by_role("button", name="Подтвердить возврат")).to_be_visible(timeout=40000)
+    page.set_viewport_size({"width": 390, "height": 844})
+    expect(page.get_by_role("heading", name="Возврат заказа №1042")).to_be_visible()
+    assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+    page.screenshot(path=str(output / "mobile-ticket.png"), full_page=False)
+    page.locator(".assistant").scroll_into_view_if_needed()
+    page.screenshot(path=str(output / "mobile-assistant.png"), full_page=False)
+    page.get_by_role("button", name="Открыть профиль").click()
+    profile = page.get_by_role("dialog", name="Рабочее пространство")
+    expect(profile.get_by_label("Организация в профиле")).to_be_visible()
+    profile.get_by_role("button", name="Выйти").click()
+    expect(page.get_by_role("button", name="Открыть демо-магазин")).to_be_visible()
+    assert page.locator(".ticket-row").count() == 0
+    assert not errors, errors
+    result = {"passed": True, "viewports": ["1536x1024", "390x844"],
+              "backend": "real API, PostgreSQL, Redis/Celery", "provider": "deterministic demo",
+              "checks": ["demo login", "source-backed draft", "approval", "reply", "audit",
+                         "policy checks", "tenant switch", "viewer role", "create ticket",
+                         "literal HTML", "mobile profile", "logout"], "console_errors": errors}
+    (output / "result.json").write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(json.dumps(result, ensure_ascii=False))
+    context.close()
+    browser.close()

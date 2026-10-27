@@ -1,0 +1,64 @@
+x-app: &app
+  build: .
+  environment: &environment
+    DATABASE_URL: postgresql+psycopg://supportflow:${DB_PASSWORD:?Run scripts/init_env.py}@db:5432/supportflow
+    APP_SECRET: ${APP_SECRET:?Run scripts/init_env.py}
+    SUPPORTFLOW_DEMO: ${SUPPORTFLOW_DEMO:-1}
+    COOKIE_SECURE: ${COOKIE_SECURE:-0}
+    APP_ORIGIN: ${APP_ORIGIN:-http://localhost:5080}
+    AI_PROVIDER: ${AI_PROVIDER:-demo}
+    OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
+    OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:7b}
+    REDIS_URL: redis://redis:6379/0
+  restart: unless-stopped
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: supportflow
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Run scripts/init_env.py}
+      POSTGRES_DB: supportflow
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U supportflow -d supportflow"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server","--save","","--appendonly","no"]
+    healthcheck:
+      test: ["CMD","redis-cli","ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+  migrate:
+    <<: *app
+    restart: "no"
+    command: ["alembic","upgrade","head"]
+    depends_on:
+      db: {condition: service_healthy}
+  api:
+    <<: *app
+    ports: ["127.0.0.1:5080:8000"]
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+    healthcheck:
+      test: ["CMD","python","-c","import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready',timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  worker:
+    <<: *app
+    command: ["celery","-A","supportflow.celery_app:app","worker","--loglevel=INFO","--concurrency=2"]
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+      redis: {condition: service_healthy}
+  scheduler:
+    <<: *app
+    command: ["celery","-A","supportflow.celery_app:app","beat","--loglevel=INFO","--schedule=/tmp/celerybeat-schedule"]
+    depends_on:
+      worker: {condition: service_started}
+volumes:
+  postgres-data:

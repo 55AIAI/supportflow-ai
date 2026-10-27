@@ -1,0 +1,106 @@
+name: SupportFlow checks
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  backend:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11","3.12","3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+      - run: pip install -r backend/requirements-worker.txt
+      - run: python -m unittest discover -s tests -v
+        working-directory: backend
+      - run: mkdir -p data && alembic upgrade head && alembic check
+        working-directory: backend
+      - run: pip check
+  end-to-end:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: supportflow
+          POSTGRES_PASSWORD: ci-only-password
+          POSTGRES_DB: supportflow_test
+        ports: ["5432:5432"]
+        options: --health-cmd "pg_isready -U supportflow -d supportflow_test" --health-interval 3s --health-timeout 3s --health-retries 20
+      redis:
+        image: redis:7.4-alpine
+        ports: ["6379:6379"]
+        options: --health-cmd "redis-cli ping" --health-interval 3s --health-timeout 3s --health-retries 20
+    env:
+      DATABASE_URL: postgresql+psycopg://supportflow:ci-only-password@127.0.0.1:5432/supportflow_test
+      TEST_DATABASE_URL: postgresql+psycopg://supportflow:ci-only-password@127.0.0.1:5432/supportflow_test
+      REDIS_URL: redis://127.0.0.1:6379/0
+      APP_SECRET: ci-only-not-a-production-secret-123456789
+      SUPPORTFLOW_DEMO: "1"
+      COOKIE_SECURE: "0"
+      INLINE_WORKER: "0"
+      AI_PROVIDER: demo
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: pip install -r backend/requirements-worker.txt playwright==1.55.0
+      - run: npm ci --no-fund && npm run build && npm audit --omit=dev --audit-level=high
+        working-directory: frontend
+      - run: alembic upgrade head && alembic check && python -m unittest discover -s tests -p test_postgres.py -v
+        working-directory: backend
+      - name: Real backend and browser workflow
+        shell: bash
+        run: |
+          cd backend
+          python -m uvicorn supportflow.server:app --host 127.0.0.1 --port 5080 --no-access-log > /tmp/supportflow-api.log 2>&1 &
+          API_PID=$!
+          celery -A supportflow.celery_app:app worker --pool=solo --loglevel=WARNING > /tmp/supportflow-worker.log 2>&1 &
+          WORKER_PID=$!
+          celery -A supportflow.celery_app:app beat --loglevel=WARNING --schedule=/tmp/sf-celerybeat > /tmp/supportflow-beat.log 2>&1 &
+          BEAT_PID=$!
+          trap 'kill $API_PID $WORKER_PID $BEAT_PID || true' EXIT
+          python - <<'PY'
+          import time, urllib.request
+          for _ in range(120):
+              try:
+                  urllib.request.urlopen("http://127.0.0.1:5080/health/ready",timeout=1)
+                  break
+              except Exception:
+                  time.sleep(.5)
+          else:
+              raise RuntimeError("API did not become ready")
+          PY
+          cd ..
+          python scripts/browser_smoke.py
+      - name: Failure diagnostics
+        if: failure()
+        run: |
+          cat /tmp/supportflow-api.log || true
+          cat /tmp/supportflow-worker.log || true
+          cat /tmp/supportflow-beat.log || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: browser-evidence
+          path: /tmp/supportflow-qa/
+          retention-days: 7
+  docker:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: python scripts/init_env.py && docker compose config --quiet
+      - run: docker build -t supportflow:test .

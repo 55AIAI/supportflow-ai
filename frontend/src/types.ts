@@ -1,0 +1,12 @@
+export type Role='owner'|'operator'|'viewer';
+export type Org={id:string;name:string;role:Role;is_demo:boolean};
+export type Session={user:{id:string;name:string;email:string};organizations:Org[];csrf_token:string};
+export type Order={id:string;org_id:string;reference:string;customer_key:string;product:string;amount_minor:number;currency:string;status:string;delivered_at:number|null;return_eligible:boolean;version:number};
+export type Source={document_id:string;version:number;title:string;quote:string};
+export type Proposal={id:string;state:string;fingerprint:string;expires_at:number;payload:{order_reference:string;amount_minor:number;currency:string}};
+export type Ticket={id:string;org_id:string;subject:string;customer_name:string;customer_key:string;message:string;order_id:string|null;status:string;category:string;draft:string;escalation:string;sources:Source[];version:number;current_job:string|null;created_at:number;updated_at:number};
+export type Detail=Ticket&{messages:{id:string;author:string;body:string;created_at:number}[];order:Order|null;proposal:Proposal|null;job:{id:string;state:string;error:string;attempts:number}|null};
+export type Knowledge={id:string;kind:string;title:string;body:string;return_days:number|null;version:number};
+export type Audit={id:string;actor:string;event:string;entity_id:string;detail:Record<string,unknown>;created_at:number};
+export type CheckResult={name:string;passed:boolean};
+export type Checks={scope:string;results:CheckResult[];passed:number;total:number};
