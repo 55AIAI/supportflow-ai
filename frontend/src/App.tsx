@@ -51,5 +51,16 @@ export default function App(){
     reply={text=>act(()=>api.reply(orgId,detail.id,text),'Ответ сохранён в переписке').then(()=>{})}/>:<div className="empty detail-empty">{selected?'Загружаем обращение…':'Создайте первое обращение'}</div>}</>:
     view==='orders'?<OrdersPage orders={orders}/>:view==='knowledge'?<KnowledgePage documents={documents} role={org?.role||'viewer'} busy={busy} save={body=>act(()=>api.saveKnowledge(orgId,body),'Правила обновлены').then(()=>{})}/>:view==='audit'?<AuditPage audit={history}/>:<ChecksPage checks={checks} busy={busy} refresh={()=>void guarded(async()=>setChecks(await api.checks(orgId)),'Проверки завершены',false)}/>}
   </main>{newTicket&&<NewTicket orders={orders} busy={busy} close={()=>setNewTicket(false)} save={body=>act(async()=>{const ticket=await api.create(orgId,body);setSelected(ticket.id);setMobileDetail(true);setView('tickets');setNewTicket(false)},'Обращение создано').then(()=>{})}/>}
+ {accountOpen&&<Modal title="Рабочее пространство" close={()=>setAccountOpen(false)}>
+  <div className="account-settings">
+   <label>Организация<select aria-label="Организация в профиле" value={orgId} onChange={e=>{generation.current++;setOrgId(e.target.value)}}>
+    {session.organizations.map(o=><option key={o.id} value={o.id}>{o.name}</option>)}
+   </select></label>
+   {org?.is_demo&&<label>Роль<select aria-label="Роль в профиле" value={org.role} disabled={busy} onChange={e=>void guarded(async()=>{await api.role(orgId,e.target.value as Role);setSession(await api.session())},'',false)}>
+    <option value="operator">Оператор</option><option value="owner">Администратор</option><option value="viewer">Наблюдатель</option>
+   </select></label>}
+   <button className="secondary" disabled={busy} onClick={()=>void guarded(async()=>{await api.logout();generation.current++;setAccountOpen(false);setSession(null);setOrgId('');setDetail(null);setTickets([])},'',false)}><LogOut size={16}/>Выйти</button>
+  </div>
+ </Modal>}
  </div>
 }
