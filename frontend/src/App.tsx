@@ -11,22 +11,23 @@ export default function App(){
  const [orgId,setOrgId]=useState(''),[view,setView]=useState('tickets'),[selected,setSelected]=useState<string|null>(null),[mobileDetail,setMobileDetail]=useState(false);
  const [tickets,setTickets]=useState<Ticket[]>([]),[detail,setDetail]=useState<Detail|null>(null),[orders,setOrders]=useState<Order[]>([]),[documents,setDocuments]=useState<Knowledge[]>([]),[history,setHistory]=useState<Audit[]>([]),[checks,setChecks]=useState<Checks|null>(null);
  const [busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState(''),[newTicket,setNewTicket]=useState(false),[register,setRegister]=useState(false),[accountOpen,setAccountOpen]=useState(false);
- const generation=useRef(0),selectedRef=useRef(selected);selectedRef.current=selected;
+ const generation=useRef(0),selectedRef=useRef(selected),orgRef=useRef(orgId);selectedRef.current=selected;orgRef.current=orgId;
  const org=session?.organizations.find(o=>o.id===orgId);
+ const validSelection=!!session&&!!orgId&&tickets.some(t=>t.id===selected&&t.org_id===orgId);
  const installSession=(value:Session)=>{setSession(value);setOrgId(value.organizations[0]?.id||'');setSelected(null);setError('')};
  useEffect(()=>{let active=true;api.config().then(async c=>{if(!active)return;setDemoAvailable(c.demo_available);if(c.authenticated){const value=await api.session();if(active)installSession(value)}}).catch(e=>{if(active)setError(e.message)}).finally(()=>{if(active)setReady(true)});return()=>{active=false}},[]);
  const refresh=useCallback(async()=>{
    if(!orgId)return;
    const token=generation.current;
    const [ts,os,ds,hs]=await Promise.all([api.tickets(orgId),api.orders(orgId),api.knowledge(orgId),api.audit(orgId)]);
-   if(token!==generation.current)return;
+   if(token!==generation.current||orgRef.current!==orgId)return;
    setTickets(ts);setOrders(os);setDocuments(ds);setHistory(hs);
    setSelected(old=>old&&ts.some(t=>t.id===old)?old:ts[0]?.id||null);
  },[orgId]);
  useEffect(()=>{generation.current++;setDetail(null);setTickets([]);setOrders([]);setDocuments([]);setHistory([]);setChecks(null);setSelected(null);setMobileDetail(false);if(session&&orgId)void refresh().catch(e=>setError(e.message));},[orgId,!!session,refresh]);
- const loadDetail=useCallback(async()=>{if(!orgId||!selected)return;const token=generation.current;const value=await api.detail(orgId,selected);if(token===generation.current&&selectedRef.current===selected)setDetail(value)},[orgId,selected]);
- useEffect(()=>{setDetail(null);let active=true;if(selected)void api.detail(orgId,selected).then(t=>{if(active)setDetail(t)}).catch(e=>{if(active)setError(e.message)});return()=>{active=false}},[orgId,selected]);
- useEffect(()=>{if(!selected||previewMode)return;const source=new EventSource('/api/orgs/'+orgId+'/tickets/'+selected+'/events');source.addEventListener('ticket',()=>{void loadDetail().catch(()=>{});void refresh().catch(()=>{})});return()=>source.close()},[orgId,selected,loadDetail,refresh]);
+ const loadDetail=useCallback(async()=>{if(!orgId||!selected||!validSelection)return;const token=generation.current;const value=await api.detail(orgId,selected);if(token===generation.current&&selectedRef.current===selected)setDetail(value)},[orgId,selected,validSelection]);
+ useEffect(()=>{setDetail(null);let active=true;if(selected&&validSelection)void api.detail(orgId,selected).then(t=>{if(active)setDetail(t)}).catch(e=>{if(active)setError(e.message)});return()=>{active=false}},[orgId,selected,validSelection]);
+ useEffect(()=>{if(!selected||!validSelection||previewMode)return;const source=new EventSource('/api/orgs/'+orgId+'/tickets/'+selected+'/events');source.addEventListener('ticket',()=>{void loadDetail().catch(()=>{});void refresh().catch(()=>{})});return()=>source.close()},[orgId,selected,validSelection,loadDetail,refresh]);
  async function act(work:()=>Promise<unknown>,message='',reload=true){
    setBusy(true);setError('');setNotice('');
    try{await work();if(reload){await refresh();await loadDetail()}if(message)setNotice(message)}
@@ -40,7 +41,7 @@ export default function App(){
  return <div className={'app '+(mobileDetail?'mobile-detail':'')}>
   <div className="demo-banner">{previewMode?'Визуальное демо в браузере · серверные действия имитируются':org?.is_demo?'Демонстрационная организация · синтетические данные':'Рабочее пространство · ответы требуют проверки'}</div>
   <header className="topbar"><a href="/" className="brand"><span className="brand-mark"/>SupportFlow AI</a><button className="primary" disabled={!org||org.role==='viewer'||busy} onClick={()=>setNewTicket(true)}><Plus size={17}/><span>Новое обращение</span></button><button className="icon-button mobile-only" aria-label="Открыть профиль" onClick={()=>setAccountOpen(true)}><Menu size={20}/></button></header>
-  <aside className="sidebar"><label className="org-select"><span className="sr-only">Организация</span><select aria-label="Организация" value={orgId} onChange={e=>{generation.current++;setOrgId(e.target.value)}}>{session.organizations.map(o=><option key={o.id} value={o.id}>{o.name}</option>)}</select></label><nav>{nav.map(([key,label,Icon])=><button key={key} className={view===key?'active':''} onClick={()=>{setView(key);setMobileDetail(false);setError('');if(key==='checks')void guarded(async()=>setChecks(await api.checks(orgId)),'',false)}}><Icon size={20}/><span>{label}</span></button>)}</nav><div className="user-block"><span className="avatar small color-1">ОД</span><div><b>{session.user.name}</b>{org?.is_demo?<select aria-label="Роль в демо" value={org.role} disabled={busy} onChange={e=>void guarded(async()=>{await api.role(orgId,e.target.value as Role);setSession(await api.session())},'',false)}><option value="operator">Оператор</option><option value="owner">Администратор</option><option value="viewer">Наблюдатель</option></select>:<span>{org?.role}</span>}</div><button className="icon-button" aria-label="Выйти" onClick={()=>void guarded(async()=>{await api.logout();generation.current++;setSession(null);setOrgId('');setDetail(null);setTickets([])},'',false)}><LogOut size={17}/></button></div></aside>
+  <aside className="sidebar"><label className="org-select"><span className="sr-only">Организация</span><select aria-label="Организация" value={orgId} onChange={e=>{generation.current++;setSelected(null);setDetail(null);setOrgId(e.target.value)}}>{session.organizations.map(o=><option key={o.id} value={o.id}>{o.name}</option>)}</select></label><nav>{nav.map(([key,label,Icon])=><button key={key} className={view===key?'active':''} onClick={()=>{setView(key);setMobileDetail(false);setError('');if(key==='checks')void guarded(async()=>setChecks(await api.checks(orgId)),'',false)}}><Icon size={20}/><span>{label}</span></button>)}</nav><div className="user-block"><span className="avatar small color-1">ОД</span><div><b>{session.user.name}</b>{org?.is_demo?<select aria-label="Роль в демо" value={org.role} disabled={busy} onChange={e=>void guarded(async()=>{await api.role(orgId,e.target.value as Role);setSession(await api.session())},'',false)}><option value="operator">Оператор</option><option value="owner">Администратор</option><option value="viewer">Наблюдатель</option></select>:<span>{org?.role}</span>}</div><button className="icon-button" aria-label="Выйти" onClick={()=>void guarded(async()=>{await api.logout();generation.current++;setSession(null);setOrgId('');setDetail(null);setTickets([])},'',false)}><LogOut size={17}/></button></div></aside>
   <main className={'workspace '+(view!=='tickets'?'single-page':'')} aria-busy={busy}>
    {error&&<div className="toast error" role="alert">{error}<button onClick={()=>setError('')} aria-label="Скрыть ошибку">×</button></div>}
    {notice&&<div className="toast success" role="status">{notice}<button onClick={()=>setNotice('')} aria-label="Скрыть уведомление">×</button></div>}
@@ -53,7 +54,7 @@ export default function App(){
   </main>{newTicket&&<NewTicket orders={orders} busy={busy} close={()=>setNewTicket(false)} save={body=>act(async()=>{const ticket=await api.create(orgId,body);setSelected(ticket.id);setMobileDetail(true);setView('tickets');setNewTicket(false)},'Обращение создано').then(()=>{})}/>}
  {accountOpen&&<Modal title="Рабочее пространство" close={()=>setAccountOpen(false)}>
   <div className="account-settings">
-   <label>Организация<select aria-label="Организация в профиле" value={orgId} onChange={e=>{generation.current++;setOrgId(e.target.value)}}>
+   <label>Организация<select aria-label="Организация в профиле" value={orgId} onChange={e=>{generation.current++;setSelected(null);setDetail(null);setOrgId(e.target.value)}}>
     {session.organizations.map(o=><option key={o.id} value={o.id}>{o.name}</option>)}
    </select></label>
    {org?.is_demo&&<label>Роль<select aria-label="Роль в профиле" value={org.role} disabled={busy} onChange={e=>void guarded(async()=>{await api.role(orgId,e.target.value as Role);setSession(await api.session())},'',false)}>

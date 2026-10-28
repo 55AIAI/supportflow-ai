@@ -12,6 +12,8 @@ with sync_playwright() as p:
     context = browser.new_context(viewport={"width": 1536, "height": 1024})
     page = context.new_page()
     errors = []
+    failed_requests = []
+    page.on("response", lambda response: failed_requests.append({"status": response.status, "url": response.url}) if response.status >= 400 else None)
     page.on("pageerror", lambda error: errors.append(str(error)))
     page.on("console", lambda message: errors.append(message.text) if message.type == "error" else None)
     page.goto(url, wait_until="networkidle")
@@ -73,7 +75,7 @@ with sync_playwright() as p:
     profile.get_by_role("button", name="Выйти").click()
     expect(page.get_by_role("button", name="Открыть демо-магазин")).to_be_visible()
     assert page.locator(".ticket-row").count() == 0
-    assert not errors, errors
+    assert not errors, {"console": errors, "failed_requests": failed_requests}
     result = {"passed": True, "viewports": ["1536x1024", "390x844"],
               "backend": "real API, PostgreSQL, Redis/Celery", "provider": "deterministic demo",
               "checks": ["demo login", "source-backed draft", "approval", "reply", "audit",
