@@ -70,3 +70,28 @@ message attachment controls absent from this implementation were omitted.
 The browser evidence should compare copy, panel structure, typography, colors, spacing
 and mobile overflow. Browser-only preview actions are explicitly simulated. The CI
 browser flow validates the actual backend separately.
+
+
+## Verified v0.1 workflow
+
+The release was checked against PostgreSQL 17 and Redis/Celery with Chrome at
+1536x1024 and 390x844. The flow covered demo login, source-backed draft, operator
+confirmation, reply, audit history, organization/role switching, literal HTML,
+mobile profile controls and logout. Browser console errors: none.
+
+Thirty API/agent tests passed on Python 3.11, 3.12 and 3.13; the additional PostgreSQL
+integration test submitted four concurrent approvals and verified one request record.
+SQLite/PostgreSQL migrations and the Docker build also passed.
+
+Visual comparison used the generated 1536x1024 concept and the actual browser captures:
+- Four-panel desktop structure and responsive detail/assistant stacking match the intended layout.
+- White and cool-gray surfaces, teal actions and outlined icons remain consistent.
+- Navigation, ticket heading, conversation, source and proposal retain the intended hierarchy.
+- Typography and spacing remain readable at the desktop and 390px mobile viewport.
+- Customer text stays literal; controls, checkboxes and mobile profile actions are real UI elements.
+
+Intentional copy changes are listed above: synthetic-only contacts, no unmeasured
+confidence percentage, explicit confirmation and accurate simulation notices. No
+material clipping or horizontal overflow was found in the checked viewports.
+
+[CI and screenshot artifacts](https://github.com/55AIAI/supportflow-ai/actions/runs/40640423557)

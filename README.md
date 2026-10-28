@@ -8,6 +8,13 @@ SQLAlchemy, PostgreSQL, Redis/Celery, React and TypeScript.
 
 **AI proposes. An operator reviews. The server validates and executes the exact action.**
 
+[Open the owner-only visual preview](https://supportflow-ai-demo-55aiai.nurtasmuhanbetov91.chatgpt.site)
+ · [Verified end-to-end run](https://github.com/55AIAI/supportflow-ai/actions/runs/40640423557)
+
+The hosted preview simulates actions in the browser. Run Docker below for the complete
+Python API, PostgreSQL and Redis/Celery application.
+
+
 ## Run the complete application
 
 Docker Desktop/Engine with Compose:
